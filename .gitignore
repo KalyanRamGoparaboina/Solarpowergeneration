@@ -1,0 +1,37 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+env/
+venv/
+ENV/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Streamlit
+.streamlit/
+
+# Model files (will be generated on Streamlit Cloud)
+solar_power_model.pkl
+*.pkl
+
+# Visualizations (will be generated)
+*.png
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
