@@ -184,15 +184,11 @@ else:
         st.sidebar.success("✓ Dataset loaded from upload")
     else:
         st.info("""
-        ### Welcome to Solar Power Generation Prediction System
+        ### 📁 Upload Dataset to Get Started
         
-        **Getting Started:**
+        **👈 Please upload `solarpowergeneration-1.csv` using the sidebar uploader**
         
-        **Option 1:** Place `solarpowergeneration-1.csv` in the app directory and refresh
-        
-        **Option 2:** Upload the CSV file using the sidebar uploader ⬅️
-        
-        The system will automatically train models when you upload the data.
+        The system will automatically train models when you upload the data (takes 1-2 minutes).
         """)
         st.stop()
 
