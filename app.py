@@ -464,7 +464,6 @@ with tabs[4]:
 with tabs[5]:
     st.markdown('<p class="sub-header">Live Prediction</p>', unsafe_allow_html=True)
     
-    # Initialize session state
     if 'prediction_result' not in st.session_state:
         st.session_state.prediction_result = None
     if 'input_values_stored' not in st.session_state:
@@ -511,14 +510,16 @@ with tabs[5]:
         st.session_state.prediction_result = prediction
         st.session_state.input_values_stored = input_values.copy()
     
-    # Display results if prediction exists
     if st.session_state.prediction_result is not None:
         prediction = st.session_state.prediction_result
         stored_inputs = st.session_state.input_values_stored
         
+        # Convert to kWh and kW
+        pred_kwh = prediction / 3600000  # Joules to kWh
+        pred_kw = prediction / 10800000  # Average kW over 3 hours
+        
         st.markdown("---")
         
-        # Prediction Result Card
         col1, col2, col3 = st.columns([1, 2, 1])
         
         with col2:
@@ -526,13 +527,13 @@ with tabs[5]:
             <div style='background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
                         color: white; padding: 2rem; border-radius: 10px; text-align: center; 
                         margin: 1rem 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>
-                <h2 style='margin: 0; font-size: 3rem; font-weight: 700;'>{prediction:,.2f}</h2>
-                <p style='margin: 0.5rem 0 0 0; font-size: 1.2rem;'>Joules per 3 hours</p>
-                <p style='margin: 0.5rem 0 0 0; opacity: 0.9;'>Model: {model_data['best_model_name']} | R²: {model_data['best_r2']:.4f}</p>
+                <h2 style='margin: 0; font-size: 3rem; font-weight: 700;'>{prediction:,.2f} J</h2>
+                <h3 style='margin: 0.8rem 0; font-size: 1.8rem; font-weight: 600; color: #d1fae5;'>{pred_kwh:.4f} kWh</h3>
+                <p style='margin: 0.5rem 0; font-size: 1rem; opacity: 0.85;'>Average Power: {pred_kw:.6f} kW</p>
+                <p style='margin: 0.5rem 0 0 0; font-size: 0.9rem; opacity: 0.8;'>Model: {model_data['best_model_name']} | R²: {model_data['best_r2']:.4f}</p>
             </div>
             """, unsafe_allow_html=True)
         
-        # Comparison with Dataset Statistics
         st.markdown("**Prediction Analysis**")
         
         col1, col2, col3, col4 = st.columns(4)
@@ -543,19 +544,28 @@ with tabs[5]:
         dataset_max = df['power-generated'].max()
         
         with col1:
-            st.metric("Dataset Mean", f"{dataset_mean:,.0f} J", 
+            mean_kwh = dataset_mean / 3600000
+            st.metric("Dataset Mean", 
+                     f"{dataset_mean:,.0f} J", 
                      f"{prediction - dataset_mean:+,.0f} J")
+            st.caption(f"{mean_kwh:.4f} kWh")
+        
         with col2:
-            st.metric("Dataset Median", f"{dataset_median:,.0f} J", 
+            median_kwh = dataset_median / 3600000
+            st.metric("Dataset Median", 
+                     f"{dataset_median:,.0f} J", 
                      f"{prediction - dataset_median:+,.0f} J")
+            st.caption(f"{median_kwh:.4f} kWh")
+        
         with col3:
             percentile = (df['power-generated'] < prediction).sum() / len(df) * 100
             st.metric("Percentile", f"{percentile:.1f}%")
+        
         with col4:
             range_pct = (prediction - dataset_min) / (dataset_max - dataset_min) * 100
-            st.metric("Range Position", f"{range_pct:.1f}%")
+            st.metric("Your Prediction", f"{pred_kwh:.4f} kWh")
+            st.caption(f"{range_pct:.1f}% of max range")
         
-        # Visualizations
         st.markdown("**Prediction Visualization**")
         
         col1, col2 = st.columns(2)
@@ -563,12 +573,12 @@ with tabs[5]:
         with col1:
             fig, ax = plt.subplots(figsize=(10, 6))
             ax.hist(df['power-generated'], bins=50, color='#3b82f6', alpha=0.6, edgecolor='black', label='Dataset Distribution')
-            ax.axvline(prediction, color='#10b981', linewidth=3, linestyle='--', label=f'Your Prediction: {prediction:,.0f} J')
+            ax.axvline(prediction, color='#10b981', linewidth=3, linestyle='--', label=f'Your Prediction: {prediction:,.0f} J ({pred_kwh:.4f} kWh)')
             ax.axvline(dataset_mean, color='#f59e0b', linewidth=2, linestyle=':', label=f'Dataset Mean: {dataset_mean:,.0f} J')
             ax.set_xlabel('Power Generated (Joules)', fontsize=12)
             ax.set_ylabel('Frequency', fontsize=12)
             ax.set_title('Prediction vs Dataset Distribution', fontsize=14, fontweight='bold')
-            ax.legend(loc='upper right')
+            ax.legend(loc='upper right', fontsize=9)
             ax.grid(alpha=0.3)
             plt.tight_layout()
             st.pyplot(fig)
@@ -597,13 +607,13 @@ with tabs[5]:
             ax.grid(axis='x', alpha=0.3)
             
             for i, (cat, val) in enumerate(zip(categories, values)):
-                ax.text(val, i, f' {val:,.0f}', va='center', fontsize=10, fontweight='bold')
+                kwh_val = val / 3600000
+                ax.text(val, i, f' {val:,.0f} J ({kwh_val:.4f} kWh)', va='center', fontsize=8, fontweight='bold')
             
             plt.tight_layout()
             st.pyplot(fig)
             plt.close()
         
-        # Input Values Comparison
         st.markdown("**Your Input Values vs Dataset Statistics**")
         
         fig, axes = plt.subplots(3, 3, figsize=(15, 12))
@@ -631,7 +641,6 @@ with tabs[5]:
         st.pyplot(fig)
         plt.close()
         
-        # Input Summary Table
         st.markdown("**Detailed Input Summary**")
         
         comparison_data = []
@@ -655,7 +664,6 @@ with tabs[5]:
         comparison_df = pd.DataFrame(comparison_data)
         st.dataframe(comparison_df, use_container_width=True)
         
-        # Reset button
         if st.button("🔄 Reset and Make New Prediction", use_container_width=True):
             st.session_state.prediction_result = None
             st.session_state.input_values_stored = None
