@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,6 +15,7 @@ import pickle
 import os
 import warnings
 warnings.filterwarnings('ignore')
+TARGET_COL = 'power-generated'
 
 st.set_page_config(page_title="Solar Power Generation Analysis", layout="wide", page_icon="☀️")
 
@@ -46,21 +47,39 @@ st.markdown('<h1 class="main-header">☀️ Solar Power Generation Prediction Sy
 
 @st.cache_data
 def load_csv_data(file):
-    if isinstance(file, str):
-        return pd.read_csv(file)
-    else:
-        return pd.read_csv(file)
+    df = pd.read_csv(file)
+    df.columns = [col.strip() for col in df.columns]
+
+    if TARGET_COL not in df.columns:
+        raise ValueError(f"Missing required target column: '{TARGET_COL}'")
+
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if TARGET_COL not in numeric_cols:
+        raise ValueError(f"Target column '{TARGET_COL}' must be numeric.")
+
+    feature_cols = [col for col in numeric_cols if col != TARGET_COL]
+    if not feature_cols:
+        raise ValueError("No numeric feature columns found in dataset.")
+
+    # Keep the dashboard stable across mixed-type uploads by using numeric columns only.
+    df = df[numeric_cols].copy()
+    df = df.replace([np.inf, -np.inf], np.nan)
+    df = df.fillna(df.median(numeric_only=True))
+    return df
 
 @st.cache_resource
 def train_models_from_data(df):
     """Train all models and return best one with results"""
     
     with st.spinner('🔄 Training models... This may take 1-2 minutes'):
-        df_clean = df.fillna(df.median())
+        if df.shape[0] < 10:
+            raise ValueError("Need at least 10 rows to train and evaluate models.")
+
+        df_clean = df.fillna(df.median(numeric_only=True))
         
-        feature_cols = [col for col in df_clean.columns if col != 'power-generated']
+        feature_cols = [col for col in df_clean.columns if col != TARGET_COL]
         X = df_clean[feature_cols]
-        y = df_clean['power-generated']
+        y = df_clean[TARGET_COL]
         
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
         
@@ -123,9 +142,14 @@ def train_models_from_data(df):
             rmse = np.sqrt(mean_squared_error(y_test, y_pred))
             mae = mean_absolute_error(y_test, y_pred)
             
-            cv_scores = cross_val_score(model, X_tr, y_train, cv=5, scoring='r2', n_jobs=-1)
-            cv_mean = cv_scores.mean()
-            cv_std = cv_scores.std()
+            cv_folds = min(5, len(y_train))
+            if cv_folds >= 2:
+                cv_scores = cross_val_score(model, X_tr, y_train, cv=cv_folds, scoring='r2', n_jobs=-1)
+                cv_mean = cv_scores.mean()
+                cv_std = cv_scores.std()
+            else:
+                cv_mean = np.nan
+                cv_std = np.nan
             
             results.append({
                 'Model': name,
@@ -160,7 +184,12 @@ def train_models_from_data(df):
             'best_rmse': best_rmse,
             'best_mae': best_mae,
             'feature_columns': feature_cols,
-            'results': results_df
+            'results': results_df,
+            'dataset_signature': {
+                'columns': list(df.columns),
+                'rows': int(df.shape[0]),
+                'target_sum': float(df[TARGET_COL].sum())
+            }
         }
         
         with open('solar_power_model.pkl', 'wb') as f:
@@ -171,32 +200,55 @@ def train_models_from_data(df):
         return model_data
 
 csv_exists = os.path.exists('solarpowergeneration-1.csv')
+data_source = st.sidebar.radio(
+    "Data Source",
+    ["Use local CSV", "Upload CSV"],
+    index=0 if csv_exists else 1
+)
 
-if csv_exists:
-    df = load_csv_data('solarpowergeneration-1.csv')
-    st.sidebar.success("✓ Dataset loaded from local file")
+if data_source == "Use local CSV":
+    if not csv_exists:
+        st.sidebar.error("Local file `solarpowergeneration-1.csv` not found.")
+        st.stop()
+    try:
+        df = load_csv_data('solarpowergeneration-1.csv')
+        st.sidebar.success("✓ Dataset loaded from local file")
+    except Exception as exc:
+        st.sidebar.error(f"Failed to load local CSV: {exc}")
+        st.stop()
 else:
-    st.sidebar.warning("📁 No local CSV found")
-    uploaded_file = st.sidebar.file_uploader("Upload solarpowergeneration-1.csv", type=['csv'])
-    
+    uploaded_file = st.sidebar.file_uploader("Upload CSV file", type=['csv'])
     if uploaded_file is not None:
-        df = load_csv_data(uploaded_file)
-        st.sidebar.success("✓ Dataset loaded from upload")
+        try:
+            df = load_csv_data(uploaded_file)
+            st.sidebar.success("✓ Dataset loaded from upload")
+        except Exception as exc:
+            st.sidebar.error(f"Failed to load uploaded CSV: {exc}")
+            st.stop()
     else:
         st.info("""
-        ### 📁 Upload Dataset to Get Started
-        
-        **👈 Please upload `solarpowergeneration-1.csv` using the sidebar uploader**
-        
-        The system will automatically train models when you upload the data (takes 1-2 minutes).
+        ### Upload Dataset to Get Started
+
+        Use the sidebar uploader and select your CSV.
         """)
         st.stop()
+
+current_signature = {
+    'columns': list(df.columns),
+    'rows': int(df.shape[0]),
+    'target_sum': float(df[TARGET_COL].sum())
+}
 
 if os.path.exists('solar_power_model.pkl'):
     try:
         with open('solar_power_model.pkl', 'rb') as f:
             model_data = pickle.load(f)
-        st.sidebar.success("✓ Pre-trained model loaded")
+        saved_signature = model_data.get('dataset_signature')
+        if saved_signature != current_signature:
+            st.sidebar.warning("⚠️ Dataset changed; retraining model for compatibility...")
+            model_data = train_models_from_data(df)
+        else:
+            st.sidebar.success("✓ Pre-trained model loaded")
     except:
         st.sidebar.warning("⚠️ Model file corrupted, retraining...")
         model_data = train_models_from_data(df)
@@ -275,10 +327,10 @@ with tabs[0]:
         plt.close()
     
     st.markdown("**Dataset Overview**")
-    st.dataframe(df.head(10), use_container_width=True)
+    st.dataframe(df.head(10), width='stretch')
     
     st.markdown("**Statistical Summary**")
-    st.dataframe(df.describe(), use_container_width=True)
+    st.dataframe(df.describe(), width='stretch')
 
 with tabs[1]:
     st.markdown('<p class="sub-header">Feature Analysis</p>', unsafe_allow_html=True)
@@ -334,7 +386,7 @@ with tabs[2]:
             'Missing Count': missing.values,
             'Percentage': missing_pct.values
         })
-        st.dataframe(missing_df, use_container_width=True)
+        st.dataframe(missing_df, width='stretch')
     
     with col2:
         st.markdown("**Outlier Detection (IQR Method)**")
@@ -348,7 +400,7 @@ with tabs[2]:
         
         outlier_df = pd.DataFrame(list(outliers.items()), columns=['Feature', 'Outlier Count'])
         outlier_df = outlier_df.sort_values('Outlier Count', ascending=False)
-        st.dataframe(outlier_df, use_container_width=True)
+        st.dataframe(outlier_df, width='stretch')
     
     st.markdown("**Skewness Analysis**")
     skew_data = df.select_dtypes(include=[np.number]).skew().sort_values(ascending=False)
@@ -392,8 +444,8 @@ with tabs[3]:
     st.pyplot(fig)
     plt.close()
     
-    st.dataframe(pd.DataFrame({'Feature': target_corr.index, 'Correlation': target_corr.values}), 
-                 use_container_width=True)
+    st.dataframe(pd.DataFrame({'Feature': target_corr.index, 'Correlation': target_corr.values}),
+                 width='stretch')
     
     st.markdown("**VIF (Variance Inflation Factor) Analysis**")
     
@@ -410,7 +462,7 @@ with tabs[3]:
     
     vif_df = pd.DataFrame(vif_data).sort_values('VIF', ascending=False)
     
-    st.dataframe(vif_df, use_container_width=True)
+    st.dataframe(vif_df, width='stretch')
     
     high_vif = vif_df[vif_df['VIF'] > 10]
     if len(high_vif) > 0:
@@ -420,7 +472,7 @@ with tabs[4]:
     st.markdown('<p class="sub-header">Model Performance Evaluation</p>', unsafe_allow_html=True)
     
     st.markdown("**Model Comparison Results**")
-    st.dataframe(model_data['results'], use_container_width=True)
+    st.dataframe(model_data['results'], width='stretch')
     
     col1, col2 = st.columns(2)
     
@@ -498,7 +550,7 @@ with tabs[5]:
                         key=f"input_{feature}"
                     )
     
-    if st.button("🚀 Predict Power Generation", type="primary", use_container_width=True):
+    if st.button("🚀 Predict Power Generation", type="primary", width='stretch'):
         input_array = np.array([input_values[feature] for feature in feature_cols]).reshape(1, -1)
         
         if model_data['is_scaled']:
@@ -662,9 +714,9 @@ with tabs[5]:
             })
         
         comparison_df = pd.DataFrame(comparison_data)
-        st.dataframe(comparison_df, use_container_width=True)
+        st.dataframe(comparison_df, width='stretch')
         
-        if st.button("🔄 Reset and Make New Prediction", use_container_width=True):
+        if st.button("🔄 Reset and Make New Prediction", width='stretch'):
             st.session_state.prediction_result = None
             st.session_state.input_values_stored = None
             st.rerun()
@@ -675,3 +727,4 @@ st.markdown("""
     <p style='margin: 0; color: #6b7280;'>Solar Power Generation Prediction System | Model Evaluation Phase</p>
 </div>
 """, unsafe_allow_html=True)
+

@@ -28,6 +28,7 @@ solar_power_model.pkl
 .DS_Store
 Thumbs.db
 *.swp
+
 *.swo
 *~
 
